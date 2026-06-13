@@ -1,0 +1,50 @@
+[
+  {
+    "filename": "templates/AI-Addendum.md",
+    "description": "Common Paper Standard AI Addendum — addendum to existing commercial agreements covering AI-specific provisions such as data use, model training, and acceptable use policies."
+  },
+  {
+    "filename": "templates/BAA.md",
+    "description": "Common Paper standard Business Associate Agreement — HIPAA-compliant agreement governing the handling of protected health information (PHI) between covered entities and business associates."
+  },
+  {
+    "filename": "templates/CSA.md",
+    "description": "Common Paper standard Cloud Service Agreement — comprehensive agreement for the provision of cloud-hosted software services, covering subscription terms, support, security, and data handling."
+  },
+  {
+    "filename": "templates/DPA.md",
+    "description": "Common Paper Data Processing Agreement — GDPR-aligned agreement governing the processing of personal data by a service provider on behalf of a data controller."
+  },
+  {
+    "filename": "templates/Mutual-NDA.md",
+    "description": "Common Paper standard Mutual Non-Disclosure Agreement — bilateral confidentiality agreement for two parties sharing sensitive or proprietary information with each other."
+  },
+  {
+    "filename": "templates/Mutual-NDA-coverpage.md",
+    "description": "Cover page for the Common Paper Mutual NDA — a short-form cover sheet capturing the key deal variables (parties, purpose, term) that attach to the Mutual-NDA.md standard terms."
+  },
+  {
+    "filename": "templates/Partnership-Agreement.md",
+    "description": "Common Paper standard Partnership Agreement — agreement governing reseller, referral, and channel partner relationships, including appointment, obligations, compensation, and IP ownership."
+  },
+  {
+    "filename": "templates/Pilot-Agreement.md",
+    "description": "Common Paper standard Pilot Agreement — time-limited agreement for product pilots and proof-of-concept trials, covering access rights, feedback obligations, and conversion to a full subscription."
+  },
+  {
+    "filename": "templates/Software-License-Agreement.md",
+    "description": "Common Paper standard Software License Agreement — enterprise on-premise software license covering grant of rights, restrictions, maintenance, support, and warranty terms."
+  },
+  {
+    "filename": "templates/design-partner-agreement.md",
+    "description": "Common Paper standard Design Partner Agreement — agreement for early-stage product design partnerships, covering access to pre-release software, feedback obligations, and confidentiality."
+  },
+  {
+    "filename": "templates/psa.md",
+    "description": "Common Paper standard Professional Services Agreement — agreement for the delivery of professional and consulting services, including statements of work, deliverables, IP ownership, and payment terms."
+  },
+  {
+    "filename": "templates/sla.md",
+    "description": "Common Paper Service Level Agreement — defines uptime commitments, measurement methodology, and service credits for cloud software services; intended to be incorporated into a CSA or equivalent."
+  }
+]
