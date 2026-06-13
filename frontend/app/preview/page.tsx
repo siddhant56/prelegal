@@ -373,8 +373,13 @@ export default function PreviewPage() {
       router.replace('/create')
       return
     }
-    setData(JSON.parse(raw))
-  }, [router])
+    try {
+      setData(JSON.parse(raw))
+    } catch {
+      router.replace('/create')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (!data) return null
 
@@ -396,7 +401,7 @@ export default function PreviewPage() {
       {/* Document */}
       <div
         className="max-w-3xl mx-auto bg-white rounded-xl border border-slate-200 p-10 space-y-10
-          print:max-w-none print:rounded-none print:border-0 print:shadow-none print:p-[2cm]"
+          print:max-w-none print:rounded-none print:border-0 print:shadow-none print:p-0"
       >
         <CoverPage data={data} />
         <div className="border-t-2 border-slate-200 pt-10">
