@@ -1,17 +1,17 @@
-# Python
+# Python (root-relative to avoid conflicting with frontend directories)
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
+/build/
 develop-eggs/
-dist/
+/dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -68,7 +68,7 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 .yarn/
-package-lock.json
+/package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
