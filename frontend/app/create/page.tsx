@@ -149,6 +149,7 @@ export default function CreatePage() {
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
                     type="radio"
+                    name="mndaTermType"
                     checked={form.mndaTermType === 'expires'}
                     onChange={() => set('mndaTermType', 'expires')}
                     className="accent-slate-700"
@@ -167,6 +168,7 @@ export default function CreatePage() {
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
                     type="radio"
+                    name="mndaTermType"
                     checked={form.mndaTermType === 'until_terminated'}
                     onChange={() => set('mndaTermType', 'until_terminated')}
                     className="accent-slate-700"
@@ -182,6 +184,7 @@ export default function CreatePage() {
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
                     type="radio"
+                    name="confidentialityTermType"
                     checked={form.confidentialityTermType === 'years'}
                     onChange={() => set('confidentialityTermType', 'years')}
                     className="accent-slate-700"
@@ -201,6 +204,7 @@ export default function CreatePage() {
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
                     type="radio"
+                    name="confidentialityTermType"
                     checked={form.confidentialityTermType === 'perpetuity'}
                     onChange={() => set('confidentialityTermType', 'perpetuity')}
                     className="accent-slate-700"
