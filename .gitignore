@@ -112,8 +112,9 @@ service-account*.json
 *.sqlite
 *.sqlite3
 
-# Docker
-.dockerignore
+# Backend runtime artifacts
+backend/static/
+backend/.venv/
 
 # Misc
 .cache/
