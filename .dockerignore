@@ -1,0 +1,11 @@
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/test-results/
+backend/.venv/
+backend/prelegal.db
+backend/static/
+.git/
+.claude/
+*.env
+.env*
