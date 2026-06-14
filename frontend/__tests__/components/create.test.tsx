@@ -46,6 +46,26 @@ function mockChatResponse(
   } as Response)
 }
 
+const allFilledFields = {
+  purpose: 'Partnership evaluation',
+  effectiveDate: '2025-01-15',
+  mndaTermType: 'expires',
+  mndaTermYears: '2',
+  confidentialityTermType: 'years',
+  confidentialityTermYears: '3',
+  governingLaw: 'Delaware',
+  jurisdiction: 'New Castle, Delaware',
+  modifications: '',
+  party1Name: 'Jane Smith',
+  party1Title: 'CEO',
+  party1Company: 'Acme Corp',
+  party1Address: 'jane@acme.com',
+  party2Name: 'John Doe',
+  party2Title: 'CTO',
+  party2Company: 'Beta Inc',
+  party2Address: 'john@beta.com',
+}
+
 beforeEach(() => {
   mockPush.mockClear()
   mockFetch.mockReset()
@@ -97,6 +117,12 @@ describe('CreatePage — rendering', () => {
     render(<CreatePage />)
     const notCollected = screen.getAllByText('Not collected')
     expect(notCollected.length).toBeGreaterThan(0)
+  })
+
+  it('renders Chat and Form mode toggle buttons', () => {
+    render(<CreatePage />)
+    expect(screen.getByRole('button', { name: /^chat$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^form$/i })).toBeInTheDocument()
   })
 })
 
@@ -230,37 +256,17 @@ describe('CreatePage — field extraction', () => {
     await user.click(screen.getByRole('button', { name: /send/i }))
 
     await waitFor(() => {
-      expect(screen.getByText("Can you tell me more?")).toBeInTheDocument()
+      expect(screen.getByText('Can you tell me more?')).toBeInTheDocument()
     })
   })
 })
 
-// ─── Completion ───────────────────────────────────────────────────────────
+// ─── Completion (chat mode) ───────────────────────────────────────────────
 
 describe('CreatePage — completion', () => {
-  const allFields = {
-    purpose: 'Partnership evaluation',
-    effectiveDate: '2025-01-15',
-    mndaTermType: 'expires',
-    mndaTermYears: '2',
-    confidentialityTermType: 'years',
-    confidentialityTermYears: '3',
-    governingLaw: 'Delaware',
-    jurisdiction: 'New Castle, Delaware',
-    modifications: '',
-    party1Name: 'Jane Smith',
-    party1Title: 'CEO',
-    party1Company: 'Acme Corp',
-    party1Address: 'jane@acme.com',
-    party2Name: 'John Doe',
-    party2Title: 'CTO',
-    party2Company: 'Beta Inc',
-    party2Address: 'john@beta.com',
-  }
-
   it('enables the Preview NDA button when is_complete is true', async () => {
     const user = userEvent.setup()
-    mockChatResponse('All done! Click Preview NDA.', allFields, true)
+    mockChatResponse('All done! Click Preview NDA.', allFilledFields, true)
     render(<CreatePage />)
 
     await user.type(screen.getByRole('textbox'), 'Yes, that is correct')
@@ -273,7 +279,7 @@ describe('CreatePage — completion', () => {
 
   it('disables the chat input when is_complete is true', async () => {
     const user = userEvent.setup()
-    mockChatResponse('All done!', allFields, true)
+    mockChatResponse('All done!', allFilledFields, true)
     render(<CreatePage />)
 
     await user.type(screen.getByRole('textbox'), 'Confirmed')
@@ -286,7 +292,7 @@ describe('CreatePage — completion', () => {
 
   it('saves fields to sessionStorage and navigates to /preview on Preview click', async () => {
     const user = userEvent.setup()
-    mockChatResponse('All done!', allFields, true)
+    mockChatResponse('All done!', allFilledFields, true)
     render(<CreatePage />)
 
     await user.type(screen.getByRole('textbox'), 'Confirmed')
@@ -334,5 +340,347 @@ describe('CreatePage — error handling', () => {
     await waitFor(() => {
       expect(screen.getByText(/something went wrong/i)).toBeInTheDocument()
     })
+  })
+})
+
+// ─── Mode toggle ──────────────────────────────────────────────────────────
+
+describe('CreatePage — mode toggle', () => {
+  it('switches to form mode when Form button is clicked', async () => {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+
+    expect(screen.getAllByText('Agreement Details').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /ai assist/i })).toBeInTheDocument()
+  })
+
+  it('switches back to chat mode when Chat button is clicked', async () => {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+    await user.click(screen.getByRole('button', { name: /^chat$/i }))
+
+    expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /ai assist/i })).not.toBeInTheDocument()
+  })
+
+  it('hides chat input in form mode', async () => {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+
+    expect(screen.queryByRole('button', { name: /^send$/i })).not.toBeInTheDocument()
+  })
+})
+
+// ─── Form mode — rendering ────────────────────────────────────────────────
+
+describe('CreatePage — form mode rendering', () => {
+  async function switchToForm() {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+    return user
+  }
+
+  it('renders Agreement Details section heading in form', async () => {
+    await switchToForm()
+    expect(screen.getAllByText('Agreement Details').length).toBeGreaterThan(0)
+  })
+
+  it('renders Party 1 section heading in form', async () => {
+    await switchToForm()
+    expect(screen.getAllByText('Party 1').length).toBeGreaterThan(0)
+  })
+
+  it('renders Party 2 section heading in form', async () => {
+    await switchToForm()
+    expect(screen.getAllByText('Party 2').length).toBeGreaterThan(0)
+  })
+
+  it('renders the AI Assist button', async () => {
+    await switchToForm()
+    expect(screen.getByRole('button', { name: /ai assist/i })).toBeInTheDocument()
+  })
+
+  it('renders governing law input', async () => {
+    await switchToForm()
+    expect(screen.getByPlaceholderText(/e\.g\. Delaware/i)).toBeInTheDocument()
+  })
+
+  it('renders jurisdiction input', async () => {
+    await switchToForm()
+    expect(screen.getByPlaceholderText(/new castle/i)).toBeInTheDocument()
+  })
+
+  it('shows "Fill all required fields to preview" hint in form mode', async () => {
+    await switchToForm()
+    expect(screen.getByText(/fill all required fields/i)).toBeInTheDocument()
+  })
+})
+
+// ─── Form mode — field updates ────────────────────────────────────────────
+
+describe('CreatePage — form mode field updates', () => {
+  it('updates governing law field when user types', async () => {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+
+    const input = screen.getByPlaceholderText(/e\.g\. Delaware/i)
+    await user.clear(input)
+    await user.type(input, 'California')
+
+    expect(input).toHaveValue('California')
+  })
+
+  it('reflects typed governing law in the right-panel field status', async () => {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+
+    const input = screen.getByPlaceholderText(/e\.g\. Delaware/i)
+    await user.clear(input)
+    await user.type(input, 'Texas')
+
+    expect(screen.getByText('Texas')).toBeInTheDocument()
+  })
+
+  it('hides mndaTermYears input when term type is "until terminated"', async () => {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+
+    const beforeCount = screen.getAllByRole('spinbutton').length
+
+    const select = screen.getByDisplayValue(/fixed term/i)
+    await user.selectOptions(select, 'until_terminated')
+
+    expect(screen.getAllByRole('spinbutton').length).toBeLessThan(beforeCount)
+  })
+
+  it('shows mndaTermYears input when term type is "expires"', async () => {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+
+    expect(screen.getAllByPlaceholderText('1').length).toBeGreaterThan(0)
+  })
+
+  it('persists fields when switching from form back to chat', async () => {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+
+    const input = screen.getByPlaceholderText(/e\.g\. Delaware/i)
+    await user.clear(input)
+    await user.type(input, 'Nevada')
+
+    await user.click(screen.getByRole('button', { name: /^chat$/i }))
+
+    expect(screen.getByText('Nevada')).toBeInTheDocument()
+  })
+})
+
+// ─── Form mode — completion ───────────────────────────────────────────────
+
+describe('CreatePage — form mode completion', () => {
+  async function fillAllFormFields(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+
+    await user.clear(screen.getByPlaceholderText(/e\.g\. Delaware/i))
+    await user.type(screen.getByPlaceholderText(/e\.g\. Delaware/i), 'Delaware')
+
+    await user.clear(screen.getByPlaceholderText(/new castle/i))
+    await user.type(screen.getByPlaceholderText(/new castle/i), 'Wilmington, Delaware')
+
+    const nameInputs = screen.getAllByPlaceholderText('Full name')
+    await user.clear(nameInputs[0])
+    await user.type(nameInputs[0], 'Jane Smith')
+    await user.clear(nameInputs[1])
+    await user.type(nameInputs[1], 'John Doe')
+
+    const titleInputs = screen.getAllByPlaceholderText('Job title')
+    await user.clear(titleInputs[0])
+    await user.type(titleInputs[0], 'CEO')
+    await user.clear(titleInputs[1])
+    await user.type(titleInputs[1], 'CTO')
+
+    const companyInputs = screen.getAllByPlaceholderText('Company name')
+    await user.clear(companyInputs[0])
+    await user.type(companyInputs[0], 'Acme Corp')
+    await user.clear(companyInputs[1])
+    await user.type(companyInputs[1], 'Beta Inc')
+
+    const addressInputs = screen.getAllByPlaceholderText('Email or postal address')
+    await user.clear(addressInputs[0])
+    await user.type(addressInputs[0], 'jane@acme.com')
+    await user.clear(addressInputs[1])
+    await user.type(addressInputs[1], 'john@beta.com')
+  }
+
+  it('enables Preview NDA when all required fields are filled', async () => {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+    await fillAllFormFields(user)
+
+    expect(screen.getByRole('button', { name: /preview nda/i })).not.toBeDisabled()
+  })
+
+  it('saves fields and navigates to /preview when Preview is clicked in form mode', async () => {
+    const user = userEvent.setup()
+    render(<CreatePage />)
+    await fillAllFormFields(user)
+
+    await user.click(screen.getByRole('button', { name: /preview nda/i }))
+
+    const stored = sessionStorage.getItem(SESSION_KEY)
+    expect(stored).not.toBeNull()
+    const data = JSON.parse(stored!)
+    expect(data.governingLaw).toBe('Delaware')
+    expect(mockPush).toHaveBeenCalledWith('/preview')
+  })
+})
+
+// ─── Form mode — AI Assist ────────────────────────────────────────────────
+
+describe('CreatePage — form mode AI Assist', () => {
+  it('calls /api/nda/autofill when AI Assist is clicked', async () => {
+    const user = userEvent.setup()
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        message: 'I filled in some fields.',
+        fields: { ...allFilledFields },
+        is_complete: true,
+      }),
+    } as Response)
+
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+    await user.click(screen.getByRole('button', { name: /ai assist/i }))
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled())
+
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe('/api/nda/autofill')
+    expect(opts.method).toBe('POST')
+    const body = JSON.parse(opts.body)
+    expect(body.fields).toBeDefined()
+  })
+
+  it('displays AI assist message after response', async () => {
+    const user = userEvent.setup()
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        message: 'I filled in governing law for you.',
+        fields: { ...allFilledFields },
+        is_complete: true,
+      }),
+    } as Response)
+
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+    await user.click(screen.getByRole('button', { name: /ai assist/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('I filled in governing law for you.')).toBeInTheDocument()
+    })
+  })
+
+  it('updates fields from AI Assist response', async () => {
+    const user = userEvent.setup()
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        message: 'Added governing law.',
+        fields: { ...allFilledFields, governingLaw: 'New York' },
+        is_complete: true,
+      }),
+    } as Response)
+
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+    await user.click(screen.getByRole('button', { name: /ai assist/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('New York')).toBeInTheDocument()
+    })
+  })
+
+  it('enables Preview NDA when AI Assist returns is_complete true', async () => {
+    const user = userEvent.setup()
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        message: 'All complete.',
+        fields: { ...allFilledFields },
+        is_complete: true,
+      }),
+    } as Response)
+
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+    await user.click(screen.getByRole('button', { name: /ai assist/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /preview nda/i })).not.toBeDisabled()
+    })
+  })
+
+  it('shows error message when AI Assist fetch fails', async () => {
+    const user = userEvent.setup()
+    mockFetch.mockRejectedValueOnce(new Error('Network error'))
+
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+    await user.click(screen.getByRole('button', { name: /ai assist/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/ai assist failed/i)).toBeInTheDocument()
+    })
+  })
+
+  it('shows error message when AI Assist returns non-ok response', async () => {
+    const user = userEvent.setup()
+    mockFetch.mockResolvedValueOnce({ ok: false } as Response)
+
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+    await user.click(screen.getByRole('button', { name: /ai assist/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/ai assist failed/i)).toBeInTheDocument()
+    })
+  })
+
+  it('clears AI assist message when user edits a field', async () => {
+    const user = userEvent.setup()
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        message: 'Here is the AI message.',
+        fields: { ...allFilledFields },
+        is_complete: true,
+      }),
+    } as Response)
+
+    render(<CreatePage />)
+    await user.click(screen.getByRole('button', { name: /^form$/i }))
+    await user.click(screen.getByRole('button', { name: /ai assist/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Here is the AI message.')).toBeInTheDocument()
+    })
+
+    const govInput = screen.getByPlaceholderText(/e\.g\. Delaware/i)
+    await user.type(govInput, 'x')
+
+    expect(screen.queryByText('Here is the AI message.')).not.toBeInTheDocument()
   })
 })

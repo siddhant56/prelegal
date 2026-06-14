@@ -20,9 +20,24 @@ DB_PATH = Path(__file__).parent / "prelegal.db"
 MODEL = "openrouter/openai/gpt-oss-120b"
 EXTRA_BODY = {"provider": {"order": ["cerebras"]}}
 
-SYSTEM_PROMPT = f"""You are a legal document assistant helping users create a Mutual Non-Disclosure Agreement (MNDA).
+AUTOFILL_PROMPT_TEMPLATE = """You are a legal document assistant. The user is filling out a Mutual NDA form and has pre-entered some fields.
 
-Today's date is {date.today().isoformat()}.
+Today's date is {today}.
+
+Your tasks:
+1. Keep all existing non-null values exactly as-is (respect what the user entered)
+2. Infer and suggest values for empty fields where you can reasonably do so (e.g. if a party address suggests a state, you might infer governingLaw and jurisdiction)
+3. Fix obvious formatting issues in existing values (dates must be YYYY-MM-DD)
+4. Set is_complete to true only when ALL required fields are populated
+
+Required fields: purpose, effectiveDate, mndaTermType, confidentialityTermType, governingLaw, jurisdiction, party1Name, party1Title, party1Company, party1Address, party2Name, party2Title, party2Company, party2Address, modifications (use empty string if none)
+Conditionally required: mndaTermYears (when mndaTermType is "expires"), confidentialityTermYears (when confidentialityTermType is "years")
+
+Return a concise message explaining what you filled in, what still needs attention, or confirming everything is complete."""
+
+SYSTEM_PROMPT_TEMPLATE = """You are a legal document assistant helping users create a Mutual Non-Disclosure Agreement (MNDA).
+
+Today's date is {today}.
 
 Have a friendly, efficient conversation to collect all required information. Ask 1-2 questions at a time.
 
@@ -73,6 +88,10 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage]
 
 
+class AutofillRequest(BaseModel):
+    fields: NDAFields
+
+
 class ChatResponse(BaseModel):
     message: str
     fields: NDAFields
@@ -112,6 +131,18 @@ app.add_middleware(
 )
 
 
+def _llm_call(messages: list[dict], api_key: str) -> ChatResponse:
+    response = completion(
+        model=MODEL,
+        messages=messages,
+        response_format=ChatResponse,
+        reasoning_effort="low",
+        extra_body=EXTRA_BODY,
+        api_key=api_key,
+    )
+    return ChatResponse.model_validate_json(response.choices[0].message.content)
+
+
 @app.get("/api/health")
 def health():
     return JSONResponse({"status": "ok"})
@@ -123,23 +154,33 @@ def nda_chat(req: ChatRequest) -> dict:
     if not api_key:
         return JSONResponse({"error": "OpenRouter API key not configured"}, status_code=500)
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(today=date.today().isoformat())
+    messages = [{"role": "system", "content": system_prompt}]
     messages += [{"role": m.role, "content": m.content} for m in req.messages]
 
     try:
-        response = completion(
-            model=MODEL,
-            messages=messages,
-            response_format=ChatResponse,
-            reasoning_effort="low",
-            extra_body=EXTRA_BODY,
-            api_key=api_key,
-        )
-        raw = response.choices[0].message.content
-        result = ChatResponse.model_validate_json(raw)
-        return result.model_dump()
+        return _llm_call(messages, api_key).model_dump()
     except Exception as e:
         logger.error("LLM call failed: %s", e)
+        return JSONResponse({"error": "Failed to process request"}, status_code=500)
+
+
+@app.post("/api/nda/autofill")
+def nda_autofill(req: AutofillRequest) -> dict:
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        return JSONResponse({"error": "OpenRouter API key not configured"}, status_code=500)
+
+    autofill_prompt = AUTOFILL_PROMPT_TEMPLATE.format(today=date.today().isoformat())
+    messages = [
+        {"role": "system", "content": autofill_prompt},
+        {"role": "user", "content": f"Here are the current NDA field values: {req.fields.model_dump_json()}"},
+    ]
+
+    try:
+        return _llm_call(messages, api_key).model_dump()
+    except Exception as e:
+        logger.error("LLM autofill failed: %s", e)
         return JSONResponse({"error": "Failed to process request"}, status_code=500)
 
 
