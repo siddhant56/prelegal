@@ -448,7 +448,7 @@ function FormField({
 }) {
   const base =
     'w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400'
-  const style = { borderColor: '#e5e7eb' }
+  const style = { borderColor: '#e5e7eb', color: '#032147', background: '#fff' }
 
   return (
     <div>
