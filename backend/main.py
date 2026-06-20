@@ -20,7 +20,7 @@ from litellm import completion
 from pydantic import BaseModel, create_model
 
 STATIC_DIR = Path(__file__).parent / "static"
-DB_PATH = Path(__file__).parent / "prelegal.db"
+DB_PATH = Path(os.environ.get("DB_PATH", str(Path(__file__).parent / "prelegal.db")))
 
 MODEL = "openrouter/openai/gpt-oss-120b"
 EXTRA_BODY = {"provider": {"order": ["cerebras"]}}
