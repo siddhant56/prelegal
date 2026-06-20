@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   getDocConfig,
@@ -10,6 +10,7 @@ import {
   isFieldRequired,
   type FieldDef,
 } from '@/lib/documents'
+import { useRequireAuth } from '@/lib/auth'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -22,7 +23,10 @@ interface Props {
 
 export default function CreateClient({ docType }: Props) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const docId = searchParams.get('docId')
   const config = getDocConfig(docType)
+  const { loading: authLoading } = useRequireAuth()
 
   const [mode, setMode] = useState<'chat' | 'form'>('chat')
   const [fields, setFields] = useState<Record<string, string>>(() =>
@@ -34,14 +38,40 @@ export default function CreateClient({ docType }: Props) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [autofilling, setAutofilling] = useState(false)
-  const [isComplete, setIsComplete] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Load existing document if docId is in URL
+  useEffect(() => {
+    if (!docId || !config) return
+    fetch(`/api/documents/${docId}`, { credentials: 'include' })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.fields) {
+          setFields((prev) => {
+            const next = { ...prev }
+            for (const [k, v] of Object.entries(data.fields as Record<string, string>)) {
+              if (v) next[k] = v
+            }
+            return next
+          })
+        }
+      })
+      .catch(() => {})
+  }, [docId, config])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-400">Loading…</p>
+      </div>
+    )
+  }
 
   if (!config) {
     return (
@@ -83,6 +113,7 @@ export default function CreateClient({ docType }: Props) {
       const res = await fetch('/api/document/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           doc_type: docType,
           messages: nextMessages,
@@ -95,8 +126,7 @@ export default function CreateClient({ docType }: Props) {
       const assistantMsg: Message = { role: 'assistant', content: data.message }
       setMessages((prev) => [...prev, assistantMsg])
       applyExtractedFields(data.fields ?? {})
-      if (data.is_complete) setIsComplete(true)
-    } catch (e) {
+    } catch {
       setError('Something went wrong. Please try again.')
     } finally {
       setLoading(false)
@@ -110,6 +140,7 @@ export default function CreateClient({ docType }: Props) {
       const res = await fetch('/api/document/autofill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ doc_type: docType, fields }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -117,17 +148,49 @@ export default function CreateClient({ docType }: Props) {
       if (data.error) throw new Error(data.error)
 
       applyExtractedFields(data.fields ?? {})
-      if (data.is_complete) setIsComplete(true)
-    } catch (e) {
+    } catch {
       setError('Autofill failed. Please try again.')
     } finally {
       setAutofilling(false)
     }
   }
 
-  function handlePreview() {
-    sessionStorage.setItem(config!.sessionKey, JSON.stringify(fields))
-    router.push(`/preview/${docType}`)
+  async function handlePreview() {
+    setSaving(true)
+    setError(null)
+    try {
+      // Write to sessionStorage for preview page (fast, no round-trip)
+      sessionStorage.setItem(config!.sessionKey, JSON.stringify(fields))
+
+      // Persist to backend
+      const title = _buildTitle(fields, config!.name)
+      if (docId) {
+        // Update existing document
+        await fetch(`/api/documents/${docId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ title, fields }),
+        })
+        router.push(`/preview/${docType}`)
+      } else {
+        // Create new document
+        const res = await fetch('/api/documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ doc_type: docType, title, fields }),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        router.push(`/preview/${docType}?docId=${data.id}`)
+      }
+    } catch {
+      // Fallback: navigate even if save failed
+      router.push(`/preview/${docType}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -155,7 +218,7 @@ export default function CreateClient({ docType }: Props) {
               ← Documents
             </Link>
             <span className="font-semibold" style={{ color: '#032147' }}>
-              Create {config.name}
+              {docId ? 'Edit' : 'Create'} {config.name}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -230,19 +293,17 @@ export default function CreateClient({ docType }: Props) {
               >
                 <div className="flex gap-2 items-end">
                   <textarea
-                    ref={textareaRef}
                     rows={2}
                     className="flex-1 resize-none rounded-xl border px-3 py-2 text-sm focus:outline-none focus:ring-2"
                     style={{ borderColor: '#e5e7eb' }}
-                    placeholder={isComplete ? 'Agreement complete — click Preview' : 'Type your message…'}
+                    placeholder="Type your message…"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    disabled={isComplete}
                   />
                   <button
                     onClick={handleSend}
-                    disabled={loading || !input.trim() || isComplete}
+                    disabled={loading || !input.trim()}
                     className="px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity disabled:opacity-40"
                     style={{ background: '#753991' }}
                   >
@@ -352,11 +413,11 @@ export default function CreateClient({ docType }: Props) {
           <div className="p-4 border-t" style={{ borderColor: '#e5e7eb' }}>
             <button
               onClick={handlePreview}
-              disabled={!canPreview}
+              disabled={!canPreview || saving}
               className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-30"
               style={{ background: '#753991' }}
             >
-              {config.previewButtonLabel}
+              {saving ? 'Saving…' : config.previewButtonLabel}
             </button>
             {!canPreview && (
               <p className="mt-2 text-xs text-center text-gray-400">
@@ -368,6 +429,12 @@ export default function CreateClient({ docType }: Props) {
       </div>
     </div>
   )
+}
+
+function _buildTitle(fields: Record<string, string>, docName: string): string {
+  const company = fields.party1Company || fields.customerName || fields.providerName || ''
+  if (company) return `${docName} — ${company}`
+  return `${docName} — ${new Date().toLocaleDateString()}`
 }
 
 function FormField({

@@ -40,18 +40,25 @@ class TestInitDb:
         assert "password_hash" in cols
         assert "created_at" in cols
 
-    def test_drops_existing_db_on_restart(self, temp_db):
+    def test_is_idempotent_on_restart(self, temp_db):
         init_db()
         conn = sqlite3.connect(temp_db)
         conn.execute("INSERT INTO users (email, password_hash) VALUES ('a@b.com', 'x')")
         conn.commit()
         conn.close()
 
-        init_db()  # second call = fresh DB
+        init_db()  # second call keeps existing data (CREATE TABLE IF NOT EXISTS)
         conn = sqlite3.connect(temp_db)
         count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         conn.close()
-        assert count == 0
+        assert count == 1
+
+    def test_creates_documents_table(self, temp_db):
+        init_db()
+        conn = sqlite3.connect(temp_db)
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        conn.close()
+        assert "documents" in tables
 
 
 class TestHealthEndpoint:

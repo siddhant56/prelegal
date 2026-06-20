@@ -1,18 +1,21 @@
 import json
 import os
+import secrets
 import sqlite3
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 import logging
 from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI
+from fastapi import Cookie, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+import bcrypt as _bcrypt
+from jose import JWTError, jwt
 from litellm import completion
 from pydantic import BaseModel, create_model
 
@@ -21,6 +24,11 @@ DB_PATH = Path(__file__).parent / "prelegal.db"
 
 MODEL = "openrouter/openai/gpt-oss-120b"
 EXTRA_BODY = {"provider": {"order": ["cerebras"]}}
+
+# JWT — falls back to a random secret (invalidated on restart) if not configured
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or secrets.token_hex(32)
+ALGORITHM = "HS256"
+TOKEN_EXPIRE_DAYS = 7
 
 
 # ============================================================
@@ -743,6 +751,43 @@ class DocumentAutofillRequest(BaseModel):
     fields: dict[str, Optional[str]]
 
 
+# Auth models
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+
+
+# Document persistence models
+class SaveDocumentRequest(BaseModel):
+    doc_type: str
+    title: str
+    fields: dict[str, Optional[str]]
+
+
+class UpdateDocumentRequest(BaseModel):
+    title: Optional[str] = None
+    fields: Optional[dict[str, Optional[str]]] = None
+
+
+class DocumentRecord(BaseModel):
+    id: int
+    doc_type: str
+    title: str
+    fields: dict
+    created_at: str
+    updated_at: str
+
+
 def _make_response_model(fields_model: type[BaseModel]) -> type[BaseModel]:
     return create_model(
         f"{fields_model.__name__}Response",
@@ -764,15 +809,24 @@ _RESPONSE_MODELS: dict[str, type[BaseModel]] = {
 # ============================================================
 
 def init_db() -> None:
-    if DB_PATH.exists():
-        DB_PATH.unlink()
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
-        CREATE TABLE users (
+        CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            doc_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            fields_json TEXT NOT NULL DEFAULT '{}',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.commit()
@@ -789,10 +843,48 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:8000"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ============================================================
+# AUTH HELPERS
+# ============================================================
+
+def _hash_password(password: str) -> str:
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    return _bcrypt.checkpw(plain.encode(), hashed.encode())
+
+
+# Pre-computed dummy hash used in login to prevent user-existence timing oracle
+_DUMMY_HASH = _hash_password("prelegal-dummy-constant-value")
+
+
+def _create_token(user_id: int) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(days=TOKEN_EXPIRE_DAYS)
+    return jwt.encode({"sub": str(user_id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def get_current_user(token: Optional[str] = Cookie(default=None)) -> dict:
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT id, email FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=401, detail="User not found")
+    return {"id": row[0], "email": row[1]}
 
 
 # ============================================================
@@ -820,6 +912,140 @@ def health():
     return JSONResponse({"status": "ok"})
 
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/register")
+def register(req: RegisterRequest, response: Response):
+    if not req.email or not req.password:
+        return JSONResponse({"error": "Email and password are required"}, status_code=400)
+    if len(req.password) < 8:
+        return JSONResponse({"error": "Password must be at least 8 characters"}, status_code=400)
+    hashed = _hash_password(req.password)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.execute(
+            "INSERT INTO users (email, password_hash) VALUES (?, ?) RETURNING id, email",
+            (req.email.lower().strip(), hashed),
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        conn.close()
+    except sqlite3.IntegrityError:
+        return JSONResponse({"error": "Email already registered"}, status_code=409)
+    token = _create_token(row[0])
+    response.set_cookie("token", token, httponly=True, samesite="lax", max_age=TOKEN_EXPIRE_DAYS * 86400)
+    return {"id": row[0], "email": row[1]}
+
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest, response: Response):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT id, email, password_hash FROM users WHERE email = ?",
+        (req.email.lower().strip(),),
+    ).fetchone()
+    conn.close()
+    # Always run bcrypt to prevent timing-based user enumeration
+    candidate_hash = row[2] if row else _DUMMY_HASH
+    if not row or not _verify_password(req.password, candidate_hash):
+        return JSONResponse({"error": "Invalid email or password"}, status_code=401)
+    token = _create_token(row[0])
+    response.set_cookie("token", token, httponly=True, samesite="lax", max_age=TOKEN_EXPIRE_DAYS * 86400)
+    return {"id": row[0], "email": row[1]}
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response):
+    response.delete_cookie("token")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def me(current_user: dict = Depends(get_current_user)):
+    return current_user
+
+
+# ── Document persistence ──────────────────────────────────────────────────────
+
+@app.get("/api/documents")
+def list_documents(current_user: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, doc_type, title, fields_json, created_at, updated_at FROM documents WHERE user_id = ? ORDER BY updated_at DESC",
+        (current_user["id"],),
+    ).fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "doc_type": r[1], "title": r[2], "fields": json.loads(r[3]), "created_at": r[4], "updated_at": r[5]}
+        for r in rows
+    ]
+
+
+@app.post("/api/documents")
+def save_document(req: SaveDocumentRequest, current_user: dict = Depends(get_current_user)):
+    if req.doc_type not in DOC_TYPE_CONFIGS:
+        return JSONResponse({"error": f"Unknown document type: {req.doc_type}"}, status_code=400)
+    now = datetime.now(timezone.utc).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.execute(
+        "INSERT INTO documents (user_id, doc_type, title, fields_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+        (current_user["id"], req.doc_type, req.title, json.dumps(req.fields), now, now),
+    )
+    doc_id = cursor.fetchone()[0]
+    conn.commit()
+    conn.close()
+    return {"id": doc_id, "doc_type": req.doc_type, "title": req.title}
+
+
+@app.get("/api/documents/{doc_id}")
+def get_document(doc_id: int, current_user: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT id, doc_type, title, fields_json, created_at, updated_at FROM documents WHERE id = ? AND user_id = ?",
+        (doc_id, current_user["id"]),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return JSONResponse({"error": "Document not found"}, status_code=404)
+    return {"id": row[0], "doc_type": row[1], "title": row[2], "fields": json.loads(row[3]), "created_at": row[4], "updated_at": row[5]}
+
+
+@app.put("/api/documents/{doc_id}")
+def update_document(doc_id: int, req: UpdateDocumentRequest, current_user: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT id, doc_type, title, fields_json FROM documents WHERE id = ? AND user_id = ?",
+        (doc_id, current_user["id"]),
+    ).fetchone()
+    if not row:
+        conn.close()
+        return JSONResponse({"error": "Document not found"}, status_code=404)
+    new_title = req.title if req.title is not None else row[2]
+    new_fields = json.dumps(req.fields) if req.fields is not None else row[3]
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE documents SET title = ?, fields_json = ?, updated_at = ? WHERE id = ?",
+        (new_title, new_fields, now, doc_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"id": doc_id, "title": new_title, "updated_at": now}
+
+
+@app.delete("/api/documents/{doc_id}")
+def delete_document(doc_id: int, current_user: dict = Depends(get_current_user)):
+    conn = sqlite3.connect(DB_PATH)
+    result = conn.execute(
+        "DELETE FROM documents WHERE id = ? AND user_id = ?",
+        (doc_id, current_user["id"]),
+    )
+    conn.commit()
+    conn.close()
+    if result.rowcount == 0:
+        return JSONResponse({"error": "Document not found"}, status_code=404)
+    return {"ok": True}
+
+
 @app.get("/api/document-types")
 def list_document_types():
     return JSONResponse([
@@ -829,7 +1055,7 @@ def list_document_types():
 
 
 @app.post("/api/document/chat")
-def document_chat(req: DocumentChatRequest) -> dict:
+def document_chat(req: DocumentChatRequest, current_user: dict = Depends(get_current_user)) -> dict:
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         return JSONResponse({"error": "OpenRouter API key not configured"}, status_code=500)
@@ -851,7 +1077,7 @@ def document_chat(req: DocumentChatRequest) -> dict:
 
 
 @app.post("/api/document/autofill")
-def document_autofill(req: DocumentAutofillRequest) -> dict:
+def document_autofill(req: DocumentAutofillRequest, current_user: dict = Depends(get_current_user)) -> dict:
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         return JSONResponse({"error": "OpenRouter API key not configured"}, status_code=500)
