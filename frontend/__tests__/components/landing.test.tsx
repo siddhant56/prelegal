@@ -35,9 +35,9 @@ describe('Login page', () => {
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument()
   })
 
-  it('navigates to /create on form submit', () => {
+  it('navigates to /documents on form submit', () => {
     render(<LoginPage />)
     fireEvent.submit(screen.getByRole('button', { name: /sign in/i }).closest('form')!)
-    expect(mockPush).toHaveBeenCalledWith('/create')
+    expect(mockPush).toHaveBeenCalledWith('/documents')
   })
 })
