@@ -8,7 +8,7 @@ The available documents are covered in the catalog.json file in the project root
 
 @catalog.json
 
-The current implementation (PL-4) provides a fake login screen and a Mutual NDA creator with form, live preview, and PDF download, served via Docker/FastAPI.
+The current implementation (PL-5) provides a fake login screen and a Mutual NDA AI chat creator with live field panel, preview, and PDF download, served via Docker/FastAPI.
 
 ## Development process
 
@@ -79,21 +79,29 @@ Backend available at http://localhost:8000
 - Next.js configured for static export (`output: 'export'`); served by FastAPI with SPA fallback
 - SQLite DB initialised fresh on each container start; `users` table created (ready for future auth)
 - Fake login screen at `/` — email/password fields, Sign In navigates to `/create`, no real auth
-- Start/stop scripts for Mac, Linux, Windows in `scripts/`
-- 8 backend pytest tests; 64 frontend Jest tests
+- Start/stop scripts for Mac, Linux, Windows in `scripts/`; start scripts pass `--env-file .env`
+
+### Completed (PL-5)
+
+- `/create` replaced with a split-pane AI chat interface (chat left, live field status panel right)
+- `POST /api/nda/chat` backend endpoint — stateless, client sends full message history each turn
+- LiteLLM → OpenRouter → Cerebras (`gpt-oss-120b`) with structured outputs (`ChatResponse` Pydantic model: `message`, `fields`, `is_complete`)
+- AI extracts NDA fields from conversation; "Preview NDA" button unlocks when `is_complete: true`
+- `ChatMessage.role` locked to `Literal["user", "assistant"]` to block prompt injection
+- 19 backend pytest tests; 71 frontend Jest tests
 
 ### Current API Endpoints
 
 - `GET /api/health` - Health check
+- `POST /api/nda/chat` - AI chat turn; body: `{messages: [{role, content}]}`; returns `{message, fields, is_complete}`
 
 ### Current Frontend Routes
 
 - `/` - Fake login page (no auth; Sign In → `/create`)
-- `/create` - Mutual NDA creator form
+- `/create` - Mutual NDA AI chat creator (split-pane: chat + field status panel)
 - `/preview` - NDA preview + browser print-to-PDF
 
 ### Not Yet Implemented
 
-- PL-5: AI chat interface (LiteLLM/Cerebras/structured outputs)
 - PL-6: Support for all 11 document types
 - PL-7: Real JWT authentication, user accounts, document persistence
