@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import { getDocConfig } from '@/lib/documents'
 import { TEMPLATES } from '@/lib/templates'
+import { useRequireAuth } from '@/lib/auth'
 
 interface Props {
   docType: string
@@ -73,8 +74,10 @@ export default function PreviewClient({ docType }: Props) {
   const router = useRouter()
   const config = getDocConfig(docType)
   const [fields, setFields] = useState<Record<string, string> | null>(null)
+  const { loading: authLoading } = useRequireAuth()
 
   useEffect(() => {
+    if (authLoading) return
     if (!config) return
     const raw = sessionStorage.getItem(config.sessionKey)
     if (!raw) {
@@ -86,7 +89,7 @@ export default function PreviewClient({ docType }: Props) {
     } catch {
       router.replace(`/create/${docType}`)
     }
-  }, [config, docType, router])
+  }, [config, docType, router, authLoading])
 
   if (!config) {
     return (

@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { DOC_TYPE_IDS } from '@/lib/documents'
 import CreateClient from './create-client'
 
@@ -9,5 +10,9 @@ type Props = { params: Promise<{ docType: string }> }
 
 export default async function CreatePage({ params }: Props) {
   const { docType } = await params
-  return <CreateClient docType={docType} />
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p className="text-gray-400">Loading…</p></div>}>
+      <CreateClient docType={docType} />
+    </Suspense>
+  )
 }
